@@ -5,11 +5,15 @@ from imantics import Mask
 from inference_utils.yolact_inference import YOLACTModel
 from tqdm import tqdm
 
+WINDOW_STRIDE = 4/5
+POLYGONS_MATCHING_THRESHOLD = 0.05
+FILTER_FALSE_DETECTIONS_THRESHOLD = 0.1
+
 
 def tiling_intersected(
         img: np.ndarray,
         tile_size: int,
-        step: float = 1/2) -> List[List[Tuple[int, int]]]:
+        step: float = WINDOW_STRIDE) -> List[List[Tuple[int, int]]]:
     stride = int(tile_size * step)
 
     x0_vec = []
@@ -59,20 +63,27 @@ class PolyDetection(object):
         self.poly = Polygon(segmentation_array + position)
 
     def estimate_iou(self, other) -> float:
-        intersection = self.poly.intersection(other.poly)
+        try:
+            intersection = self.poly.intersection(other.poly)
+        except:
+            return 0
+
+        if intersection.area < 1E-5:
+            return 0
+
         union = self.poly.union(other.poly)
 
         return intersection.area / (union.area + 1E-5)
 
 
 class DetectionsCarrier(object):
-    detections: List[PolyDetection] = []
+    detections: List[PolyDetection] = None
 
 
 def merge_carriers(
         scope_src: DetectionsCarrier,
         scope_to_add: DetectionsCarrier,
-        match_threshold: float = 0.45):
+        match_threshold: float = POLYGONS_MATCHING_THRESHOLD):
     pairwise_intersections = np.array([
         [
             scope_to_add.detections[si].estimate_iou(scope_src.detections[sj])
@@ -85,15 +96,24 @@ def merge_carriers(
         search_idx = -1
         best_iou = 0
         diff_poly = Polygon(scope_to_add.detections[si].poly)
+        full_skip = False
 
         for sj in range(pairwise_intersections.shape[1]):
             p_iou = pairwise_intersections[si][sj]
-            diff_poly = diff_poly.difference(scope_src.detections[sj].poly)
+
+            try:
+                diff_poly = diff_poly.difference(scope_src.detections[sj].poly)
+            except:
+                full_skip = True
+                break
 
             if p_iou - match_threshold > -1E-5:
                 if p_iou - best_iou > -1E-5:
                     search_idx = sj
                     best_iou = p_iou
+
+        if full_skip:
+            continue
 
         if search_idx == -1:
             scope_src.detections.append(scope_to_add.detections[si])
@@ -140,10 +160,26 @@ class WindowReadyImage(DetectionsCarrier):
             ]
             for t_line in tqdm(tiling_intersected(image, tile_size))
         ]
+        self.detections = []
 
         for t_line in tqdm(self.segments):
             for t in t_line:
                 merge_carriers(self, t)
+
+        self.filter_noisy_points()
+
+    def filter_noisy_points(self):
+        avg_area = np.array(
+            [
+                d.poly.area
+                for d in self.detections
+            ]
+        ).mean()
+        self.detections = [
+            d
+            for d in self.detections
+            if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5
+        ]
 
 
 if __name__ == '__main__':
