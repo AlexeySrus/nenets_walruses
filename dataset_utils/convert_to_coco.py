@@ -280,9 +280,9 @@ def main():
     ]
     dataset_images_names.sort()
     np.random.shuffle(dataset_images_names)
-    dataset_size = len(dataset_images_names)
+    dataset_size = len(dataset_images_names) * args.ncrops
 
-    n = int(dataset_size * (1 - args.val_part)) * args.ncrops
+    n = int(dataset_size * (1 - args.val_part))
 
     train_coco = init_coco_dict()
     val_coco = init_coco_dict()
