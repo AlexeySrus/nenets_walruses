@@ -6,13 +6,15 @@ import numpy as np
 import json
 from multiprocessing import Pool
 from tqdm import tqdm
-from imantics import Mask
 from shapely.geometry import Polygon
 
 
 classes_names = [
     'walrus'
 ]
+
+CROP_SIZE = 700
+FILTER_COEFF = 0.2
 
 
 def imap_unordered_bar(func, args, n_processes=8):
@@ -137,6 +139,31 @@ def worker_mask_generation_function(worker_arg):
 
         result = []
 
+        crop_x1 = np.random.randint(0, image.size[0] - CROP_SIZE)
+        crop_y1 = np.random.randint(0, image.size[1] - CROP_SIZE)
+        crop_x2 = crop_x1 + CROP_SIZE
+        crop_y2 = crop_y1 + CROP_SIZE
+
+        image = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+        poly_areas = []
+
+        for i, m in enumerate(markup_data):
+            poly_points = m['segmentation_poly']
+            if len(poly_points) == 1:
+                poly_points = poly_points[0]
+
+            if len(poly_points) < 3 * 2:
+                continue
+
+            poly_areas.append(
+                Polygon(np.array(poly_points).reshape(-1, 2)).area
+            )
+
+        if len(poly_areas) > 0:
+            poly_avg_area = np.mean(poly_areas)
+        else:
+            poly_avg_area = None
+
         for i, m in enumerate(markup_data):
             target_class = 0
             # wrapped_mask = Mask(masks[i])
@@ -145,17 +172,29 @@ def worker_mask_generation_function(worker_arg):
                 poly_points = poly_points[0]
 
             if len(poly_points) < 3 * 2:
-                print(masks_json_path)
-                print(m)
+                # print(masks_json_path)
+                # print(m)
                 continue
 
-            poly = Polygon(np.array(poly_points).reshape(-1, 2))
+            poly_points = np.array(poly_points).reshape(-1, 2) - [crop_x1, crop_y1]
+            poly_points_x = np.clip(poly_points[:, 0], 0, CROP_SIZE)
+            poly_points_y = np.clip(poly_points[:, 1], 0, CROP_SIZE)
+
+            poly_points = np.stack((poly_points_x, poly_points_y), axis=1)
+
+            poly = Polygon(poly_points)
 
             area = poly.area
+
+            if area <= 1E-5:
+                continue
+
+            if area - poly_avg_area * FILTER_COEFF < -1E-5:
+                continue
             # segmentation_data = wra
             # pped_mask.polygons().segmentation
             # box = cv2.boundingRect(m)
-            box = m['bbox']
+            box = cv2.boundingRect(np.expand_dims(poly_points.astype(np.float32), 1))
 
             # segmentation_data = [
             #     np.array(segm_elem).reshape((-1, 2))[::5].astype(
@@ -174,7 +213,7 @@ def worker_mask_generation_function(worker_arg):
 
             result.append(
                 {
-                    'segmentation': np.array(poly_points).tolist(),
+                    'segmentation': [[float(p) for p in poly_points.flatten()]],
                     'bbox': [float(b) for b in box],
                     'area': float(area),
                     'iscrowd': 0,
@@ -185,7 +224,7 @@ def worker_mask_generation_function(worker_arg):
             )
 
         if len(result) == 0:
-            print('Skipped index: {}'.format(idx))
+            # print('Skipped index: {}'.format(idx))
             res.append([idx, None, None])
             continue
 
@@ -217,6 +256,9 @@ def parse_args():
     parser.add_argument(
         '--njobs', required=False, type=int, default=24
     )
+    parser.add_argument(
+        '--ncrops', required=False, type=int, default=50
+    )
     return parser.parse_args()
 
 
@@ -240,7 +282,7 @@ def main():
     np.random.shuffle(dataset_images_names)
     dataset_size = len(dataset_images_names)
 
-    n = int(dataset_size * (1 - args.val_part))
+    n = int(dataset_size * (1 - args.val_part)) * args.ncrops
 
     train_coco = init_coco_dict()
     val_coco = init_coco_dict()
@@ -261,13 +303,12 @@ def main():
 
         image_path = os.path.join(
             args.images_folder,
-            dataset_images_names[common_image_index - 1] + '.jpg'
+            dataset_images_names[(common_image_index - 1) // args.ncrops] + '.jpg'
         )
         masks_path = os.path.join(
             args.markup_folder,
-            dataset_images_names[common_image_index - 1] + '.json'
+            dataset_images_names[(common_image_index - 1) // args.ncrops] + '.json'
         )
-
 
         masks_building_tasks_data.append(
             [
@@ -326,7 +367,7 @@ def main():
                 {
                     'id': object_index,
                     'name': classes_names[obj_elem['category_id'] - 1],
-                    'supercategory': 'logo'
+                    'supercategory': 'animal'
                 }
             )
 
@@ -359,11 +400,11 @@ def main():
 
         image_path = os.path.join(
             args.images_folder,
-            dataset_images_names[common_image_index - 1] + '.jpg'
+            dataset_images_names[(common_image_index - 1) // args.ncrops] + '.jpg'
         )
         masks_path = os.path.join(
             args.markup_folder,
-            dataset_images_names[common_image_index - 1] + '.json'
+            dataset_images_names[(common_image_index - 1) // args.ncrops] + '.json'
         )
 
         masks_building_tasks_data.append(
@@ -423,7 +464,7 @@ def main():
                 {
                     'id': object_index,
                     'name': classes_names[obj_elem['category_id'] - 1],
-                    'supercategory': 'logo'
+                    'supercategory': 'animal'
                 }
             )
 
