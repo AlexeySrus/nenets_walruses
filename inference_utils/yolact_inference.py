@@ -10,7 +10,7 @@ class YOLACTModel(object):
 
     def __init__(self,
                  yolact_path: str = os.path.join(os.path.dirname(__file__), 'custom_yolact/'),
-                 device: str = 'cuda:0'):
+                 device: str = 'cpu'):
         sys.path.append(yolact_path)
         from eval import FastBaseTransform, main, Yolact
         from layers.output_utils import postprocess
