@@ -1,4 +1,5 @@
 from typing import Tuple, List
+import cv2
 import numpy as np
 from shapely.geometry import Polygon
 from imantics import Mask
@@ -8,6 +9,21 @@ from tqdm import tqdm
 WINDOW_STRIDE = 4/5
 POLYGONS_MATCHING_THRESHOLD = 0.05
 FILTER_FALSE_DETECTIONS_THRESHOLD = 0.1
+POINTS_MATCHING_THRESHOLD = 0.3
+
+
+def compute_poly_incircle_center(_poly: Polygon) -> Tuple[int, int]:
+    ppoints = np.array(_poly.exterior.xy).T.astype(np.float32)
+    box = cv2.boundingRect(ppoints)
+    ppoints -= box[:2]
+    ppoints = np.expand_dims(ppoints, axis=1).astype(np.int0)
+
+    mask = np.zeros((box[3], box[2]), dtype=np.uint8)
+    mask = cv2.drawContours(mask, [ppoints], 0, 255, -1)
+    dres = cv2.distanceTransform(mask, cv2.DIST_L2, 5, cv2.DIST_LABEL_PIXEL)
+    _, _, _, (cx, cy) = cv2.minMaxLoc(dres, None)
+    return (ppoints.squeeze(1).mean(axis=0) + box[:2]).astype(np.int32)
+    # return cx + box[0], cy + box[1]
 
 
 def tiling_intersected(
@@ -104,8 +120,9 @@ def merge_carriers(
             try:
                 diff_poly = diff_poly.difference(scope_src.detections[sj].poly)
             except:
-                full_skip = True
-                break
+                continue
+                # full_skip = True
+                # break
 
             if p_iou - match_threshold > -1E-5:
                 if p_iou - best_iou > -1E-5:
@@ -164,22 +181,47 @@ class WindowReadyImage(DetectionsCarrier):
 
         for t_line in tqdm(self.segments):
             for t in t_line:
+                # self.detections += t.detections
                 merge_carriers(self, t)
 
         self.filter_noisy_points()
 
-    def filter_noisy_points(self):
-        avg_area = np.array(
+    def average_polygons_area(self) -> float:
+        return np.array(
             [
                 d.poly.area
                 for d in self.detections
             ]
         ).mean()
+
+    def filter_noisy_points(self):
+        avg_area = self.average_polygons_area()
         self.detections = [
             d
             for d in self.detections
             if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5
         ]
+
+    def get_points(self):
+        avg_d = np.sqrt(self.average_polygons_area())
+        center_points = [
+            compute_poly_incircle_center(p.poly)
+            for p in self.detections
+        ]
+
+        filtered_points = []
+
+        for bp in center_points:
+            in_set = False
+            for p in filtered_points:
+                if np.linalg.norm(p - bp) - avg_d * POINTS_MATCHING_THRESHOLD < 1E-5:
+                    in_set = True
+                    continue
+
+            if not in_set:
+                filtered_points.append(np.array(bp))
+
+        return filtered_points
 
 
 if __name__ == '__main__':
@@ -196,3 +238,4 @@ if __name__ == '__main__':
     sample_image = read_image(
         '/media/alexey/SSDDataDisk/datasets/walruses/raw/images/191.jpg')
     pred_sample = WindowReadyImage(sample_image, yolact_inference, 700)
+    pred_sample.get_points()

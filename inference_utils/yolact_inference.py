@@ -46,7 +46,7 @@ class YOLACTModel(object):
             image.shape[0],
             interpolation_mode='bilinear',
             crop_masks=True,
-            score_threshold=0.6
+            score_threshold=0.8
         )
 
         preds = [p.detach().to('cpu') for p in preds]
