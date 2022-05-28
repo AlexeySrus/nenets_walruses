@@ -1,19 +1,16 @@
 import base64
-import math
 import io
-import os
-import sys
-from typing import List, Dict
+import math
 import warnings
+from typing import List, Dict
 
-import cv2
 import folium
-import numpy as np
+import requests
 import streamlit as st
-import torch
 from PIL import Image, ImageDraw
 from PIL.ImageDraw import ImageDraw
 from folium.plugins import HeatMap
+from requests_toolbelt import MultipartEncoder
 from st_aggrid import AgGrid, GridOptionsBuilder
 from streamlit_folium import st_folium
 
@@ -24,72 +21,17 @@ from models import (
 
 warnings.filterwarnings("ignore")
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(
-    os.path.join(os.path.dirname(__file__), '..', 'inference_utils')
-)
-
-from yolact_inference import YOLACTModel
-from young_classifier import YoungWalrusesClassier
-from tiled_segmentation import WindowReadyImage
-
-
 st.set_page_config(
     page_title='Мониторинг популяции ненецких моржей',
     layout='wide'
 )
 
 
-class MockModel:
-    """Class that is used as model and has the same format output."""
-
-    def __init__(self):
-        """Initialize mock model."""
-        bg = np.zeros((100, 100), np.uint8)
-        masks = [bg.copy() for i in range(3)]
-        masks[0][10:20, 10:20] += 1
-        masks[1][30:50, 15:30] += 1
-        masks[1][50:60, 70:85] += 1
-        self.masks = np.array(masks, dtype=np.uint8)
-
-        self.boxes = np.array([
-            [10, 10, 20, 20],
-            [25, 10, 55, 30],
-            [20, 10, 55, 30]
-        ])
-
-        self.classes = [0, 1, 0]
-
-    def __call__(self, image: np.ndarray, *args):
-        """Get mock results."""
-        h, w = image.shape[:2]
-        masks = []
-        for mask in self.masks:
-            m = mask.copy()
-            m = cv2.resize(m, (w, h))
-            masks.append(m)
-        return masks, self.boxes, self.classes
-
-
-@st.cache(
-    allow_output_mutation=True,
-    hash_funcs={torch._C.ScriptModule: lambda _: None}
-)
-def load_models():
-    """Load ML model to process images."""
-    model = YOLACTModel()
-    # model = MMDetectionQueryInstInference(conf=0.4)
-    # model = MockModel()
-    yong_clasifier = YoungWalrusesClassier(conf=0.7)
-    return model, yong_clasifier
-
-
-MODEL, YOUNG_CLASSIFIER = load_models()
-
 # Some constants
 CIRCLE_WIDTH = 2
 POLY_WIDTH = 1
 COEF = 0.002
+URL = 'http://localhost:8001/predict'
 
 
 def visualize_results(
@@ -150,32 +92,22 @@ def _prepare_coords(coords: List[WalrusCoord]) -> dict:
     return result
 
 
-def predict(image: np.ndarray):
-    """Get prediction for the given image."""
-    wri = WindowReadyImage(image, MODEL, YOUNG_CLASSIFIER)
-    polygons = [
-        np.array(det.poly.exterior.xy).T.astype(int).ravel().tolist()
-        for det in wri.detections
-    ]
-    classes = [det.cls == 1 for det in wri.detections]
-
-    return {
-        'centers': wri.get_points(),
-        'boxes': [],
-        'polygons': polygons,
-        'classes': classes
-    }
-
-
-# @st.cache(
-#     allow_output_mutation=True,
-#     hash_funcs={torch._C.ScriptModule: lambda _: None}
-# )
 @st.experimental_memo(show_spinner=False)
 def process_image(image_uploaded: str):
     """Process uploaded image and get prepared results."""
     image = Image.open(image_uploaded)
-    json_results = predict(np.array(image))
+    image.save(image_uploaded.name)
+    mp_encoder = MultipartEncoder(
+        fields={
+            'image': (
+                image_uploaded.name, image_uploaded, image_uploaded.type
+            )
+        }
+    )
+    response = requests.post(URL, data=mp_encoder, headers={
+        'Content-Type': mp_encoder.content_type
+    })
+    json_results = response.json()
     return image, json_results
 
 
@@ -274,22 +206,9 @@ def layout_process_image():
     st.subheader('Изображение')
     container = st.empty()
     if image_uploaded is not None:
-        # Image.open(image_uploaded).save(image_uploaded.name)
-        # mp_encoder = MultipartEncoder(
-        #     fields={
-        #         'image': (
-        #             image_uploaded.name, image_uploaded, image_uploaded.type
-        #         )
-        #     }
-        # )
-        # response = requests.post(url, data=mp_encoder, headers={
-        #     'Content-Type': mp_encoder.content_type
-        # })
-        # json_results = response.json()
-        # json_results = MOCK_JSON
-
         with st.spinner('Выполняется обработка...'):
             image, json_results = process_image(image_uploaded)
+            print(json_results)
 
         fname = 'results.csv'
         save_csv(json_results, fname)
