@@ -10,9 +10,9 @@ from tqdm import tqdm
 
 WINDOW_STRIDE = 3/4
 POLYGONS_MATCHING_THRESHOLD = 0.2
-FILTER_FALSE_DETECTIONS_THRESHOLD = 0.15
+FILTER_FALSE_DETECTIONS_THRESHOLD = 0.2
 POINTS_MATCHING_THRESHOLD = 0.3
-BIG_FILTER = 5
+BIG_FILTER = 3.5
 
 
 def compute_poly_incircle_center(_poly: Polygon) -> Tuple[int, int]:
@@ -222,7 +222,6 @@ class WindowReadyImage(DetectionsCarrier):
 
         for t_line in tqdm(self.segments):
             for t in t_line:
-                # self.detections += t.detections
                 merge_carriers(self, t)
 
         self.filter_noisy_points()
@@ -244,10 +243,11 @@ class WindowReadyImage(DetectionsCarrier):
 
     def filter_noisy_points(self):
         avg_area = self.average_polygons_area()
+        print(FILTER_FALSE_DETECTIONS_THRESHOLD)
         self.detections = [
             d
             for d in self.detections
-            if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5 and isinstance(d.poly, Polygon) and d.poly.area < avg_area * BIG_FILTER
+            if (d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > 1E-5) and isinstance(d.poly, Polygon) and (d.poly.area < avg_area * BIG_FILTER)
         ]
 
     def filter_outlier_points(self):
@@ -257,7 +257,7 @@ class WindowReadyImage(DetectionsCarrier):
         # max_pwd = pwd.max()
         max_pwd = (self.hole_image.shape[1] + self.hole_image.shape[0]) / 2
 
-        db = DBSCAN(eps=max_pwd / 5, min_samples=10, n_jobs=4).fit(_X)
+        db = DBSCAN(eps=max_pwd / 6, min_samples=10, n_jobs=4).fit(_X)
         labels = db.labels_
 
         self.detections = [

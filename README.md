@@ -1,2 +1,13 @@
-# nenets_walruses
-RostovNats realization for hacks-ai hackathon
+# ИИ на страже популяции ненецких моржей
+Реализация подготовлена командой RostovNats 
+
+## Установка
+
+### Через готовый образ Docker
+Если не установлен Docker с поддержкой CUDA установите его с помощью следующей команды:
+```shell
+sh installation/install_cuda_docker.sh
+```
+
+### Вручную
+
