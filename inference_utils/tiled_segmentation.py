@@ -1,13 +1,14 @@
-from typing import Tuple, List
+from typing import Tuple, List, Any
 import cv2
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
 from imantics import Mask
 from inference_utils.yolact_inference import YOLACTModel
+from inference_utils.mmdet_inference import MMDetectionQueryInstInference
 from tqdm import tqdm
 
-WINDOW_STRIDE = 4/5
-POLYGONS_MATCHING_THRESHOLD = 0.05
+WINDOW_STRIDE = 3/4
+POLYGONS_MATCHING_THRESHOLD = 0.1
 FILTER_FALSE_DETECTIONS_THRESHOLD = 0.1
 POINTS_MATCHING_THRESHOLD = 0.3
 
@@ -58,31 +59,47 @@ def tiling_intersected(
     return poses
 
 
+def multi_to_single_polygon(_poly):
+    if _poly.geom_type == 'MultiPolygon' or _poly.geom_type == 'GeometryCollection':
+        return _poly.convex_hull
+    return _poly
+
+
 class PolyDetection(object):
     def __init__(self, _mask: np.ndarray, class_num: int, position: Tuple[int, int]):
         self.cls = class_num
 
-        wrapped_mask = Mask(_mask)
-        segmentation_data = wrapped_mask.polygons().segmentation
+        contours, _ = cv2.findContours(
+            _mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE
+        )
 
-        assert len(segmentation_data) > 0, 'Empty polygon of class {}'.format(self.cls)
+        contours = list(contours)
+        contours.sort(key=lambda _x: cv2.contourArea(_x))
 
-        segmentation_data = max(segmentation_data, key=lambda _x: len(_x))
+        if len(contours) == 0:
+            self.poly = None
+            return
 
-        if len(segmentation_data) >= 7*5:
-            segmentation_array = np.array(
-                segmentation_data).reshape((-1, 2))[::5].astype(np.float32)
-        else:
-            segmentation_array = np.array(
-                segmentation_data).reshape((-1, 2)).astype(np.float32)
+        segmentation_data = contours[0].squeeze(1)
 
-        self.poly = Polygon(segmentation_array + position)
+        if len(segmentation_data) > 100:
+            segmentation_data = segmentation_data[::8]
+        elif len(segmentation_data) > 30:
+            segmentation_data = segmentation_data[::4]
+
+        if len(segmentation_data) < 3:
+            self.poly = None
+            return
+
+        segmentation_array = np.array(
+            segmentation_data).astype(np.float32) + position
+
+        self.poly = Polygon(segmentation_array)
 
     def estimate_iou(self, other) -> float:
-        try:
-            intersection = self.poly.intersection(other.poly)
-        except:
-            return 0
+        intersection = self.poly.intersection(other.poly)
 
         if intersection.area < 1E-5:
             return 0
@@ -95,47 +112,55 @@ class PolyDetection(object):
 class DetectionsCarrier(object):
     detections: List[PolyDetection] = None
 
+    def erase_invalids(self):
+        self.detections = [
+            d
+            for d in self.detections
+            if d.poly is not None and d.poly.is_valid
+        ]
+
 
 def merge_carriers(
         scope_src: DetectionsCarrier,
         scope_to_add: DetectionsCarrier,
         match_threshold: float = POLYGONS_MATCHING_THRESHOLD):
-    pairwise_intersections = np.array([
+    pairwise_intersections = [
         [
             scope_to_add.detections[si].estimate_iou(scope_src.detections[sj])
             for sj in range(len(scope_src.detections))
         ]
         for si in range(len(scope_to_add.detections))
-    ])
+    ]
 
     for si in range(len(scope_to_add.detections)):
         search_idx = -1
         best_iou = 0
-        diff_poly = Polygon(scope_to_add.detections[si].poly)
-        full_skip = False
 
-        for sj in range(pairwise_intersections.shape[1]):
+        diff_poly = Polygon(scope_to_add.detections[si].poly)
+
+        for sj in range(len(pairwise_intersections[si])):
+            if pairwise_intersections[si][sj] < 1E-5:
+                continue
+
+            if not diff_poly.is_valid:
+                continue
+
             p_iou = pairwise_intersections[si][sj]
 
-            try:
-                diff_poly = diff_poly.difference(scope_src.detections[sj].poly)
-            except:
-                continue
-                # full_skip = True
-                # break
+            diff_poly = diff_poly.difference(scope_src.detections[sj].poly)
 
             if p_iou - match_threshold > -1E-5:
                 if p_iou - best_iou > -1E-5:
                     search_idx = sj
                     best_iou = p_iou
 
-        if full_skip:
-            continue
-
         if search_idx == -1:
             scope_src.detections.append(scope_to_add.detections[si])
+            for k in range(si + 1, len(scope_to_add.detections)):
+                pairwise_intersections[k].append(scope_to_add.detections[k].estimate_iou(scope_src.detections[-1]))
         else:
-            scope_src.detections[search_idx].poly = scope_src.detections[search_idx].poly.union(scope_to_add.detections[si].poly)
+            if diff_poly.is_valid:
+                scope_src.detections[search_idx].poly = multi_to_single_polygon(scope_src.detections[search_idx].poly.union(diff_poly))
 
 
 class ImageSegment(DetectionsCarrier):
@@ -143,7 +168,7 @@ class ImageSegment(DetectionsCarrier):
                  hole_image: np.ndarray,
                  position: Tuple[int, int],
                  size: Tuple[int, int],
-                 inference_function: YOLACTModel):
+                 inference_function: callable):
         self.pos = position
         self.size = size
         self.hole_image = hole_image
@@ -154,6 +179,8 @@ class ImageSegment(DetectionsCarrier):
             PolyDetection(masks[_mi], pred_classes[_mi], position)
             for _mi in range(len(masks))
         ]
+
+        self.erase_invalids()
 
     def get_crop(self):
         return self.hole_image[
@@ -168,7 +195,7 @@ class ImageSegment(DetectionsCarrier):
 class WindowReadyImage(DetectionsCarrier):
     def __init__(self,
                  image: np.ndarray,
-                 inference_function: YOLACTModel,
+                 inference_function: callable,
                  tile_size: int = 512):
         self.segments = [
             [
@@ -199,7 +226,7 @@ class WindowReadyImage(DetectionsCarrier):
         self.detections = [
             d
             for d in self.detections
-            if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5
+            if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5 and isinstance(d.poly, Polygon) and d.poly.area < avg_area * 2.8
         ]
 
     def get_points(self):
@@ -234,8 +261,8 @@ if __name__ == '__main__':
         return cv2.cvtColor(_img, cv2.COLOR_BGR2RGB)
 
 
-    yolact_inference = YOLACTModel()
+    inference_f = MMDetectionQueryInstInference()
     sample_image = read_image(
-        '/media/alexey/SSDDataDisk/datasets/walruses/raw/images/191.jpg')
-    pred_sample = WindowReadyImage(sample_image, yolact_inference, 700)
+        '/media/alexey/SSDDataDisk/datasets/walruses/raw/images/DJI_0049.jpg')
+    pred_sample = WindowReadyImage(sample_image, inference_f, 700)
     pred_sample.get_points()
