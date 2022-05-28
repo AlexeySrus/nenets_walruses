@@ -20,9 +20,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'inference_utils'))
 
 from yolact_inference import YOLACTModel
+from young_classifier import YoungWalrusesClassier
+from mmdet_inference import MMDetectionQueryInstInference
 from tiled_segmentation import WindowReadyImage
 
-model = YOLACTModel(device='cpu')
+# model = YOLACTModel(device='cpu')
+model = MMDetectionQueryInstInference(conf=0.4)
+yong_clasifier = YoungWalrusesClassier(conf=0.7)
 
 
 def read_config():
@@ -222,7 +226,7 @@ def process_image(image_uploaded: str):
 
 
 def predict(image: np.ndarray):
-    wri = WindowReadyImage(image, model)
+    wri = WindowReadyImage(image, model, yong_clasifier)
     polygons = [
         np.array(det.poly.exterior.xy).T.astype(int).ravel().tolist()
         for det in wri.detections
