@@ -1,9 +1,9 @@
-from typing import Tuple, List, Any
+from typing import Tuple, List
 import cv2
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
-from imantics import Mask
 from inference_utils.yolact_inference import YOLACTModel
+from sklearn.cluster import DBSCAN
 from inference_utils.mmdet_inference import MMDetectionQueryInstInference
 from inference_utils.crop_utils import create_square_crop_by_detection
 from tqdm import tqdm
@@ -12,7 +12,7 @@ WINDOW_STRIDE = 3/4
 POLYGONS_MATCHING_THRESHOLD = 0.2
 FILTER_FALSE_DETECTIONS_THRESHOLD = 0.15
 POINTS_MATCHING_THRESHOLD = 0.3
-BIG_FILTER = 3
+BIG_FILTER = 5
 
 
 def compute_poly_incircle_center(_poly: Polygon) -> Tuple[int, int]:
@@ -208,7 +208,8 @@ class WindowReadyImage(DetectionsCarrier):
                  image: np.ndarray,
                  inference_function: callable,
                  young_inference: callable,
-                 tile_size: int = 512):
+                 tile_size: int = 512,
+                 filter_outliers: bool = True):
         self.segments = [
             [
                 ImageSegment(image, t, (tile_size, tile_size), inference_function)
@@ -217,6 +218,7 @@ class WindowReadyImage(DetectionsCarrier):
             for t_line in tqdm(tiling_intersected(image, tile_size))
         ]
         self.detections = []
+        self.hole_image = image
 
         for t_line in tqdm(self.segments):
             for t in t_line:
@@ -224,6 +226,8 @@ class WindowReadyImage(DetectionsCarrier):
                 merge_carriers(self, t)
 
         self.filter_noisy_points()
+        if filter_outliers:
+            self.filter_outlier_points()
 
         for _di in tqdm(range(len(self.detections))):
             self.detections[_di].set_class(
@@ -244,6 +248,22 @@ class WindowReadyImage(DetectionsCarrier):
             d
             for d in self.detections
             if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5 and isinstance(d.poly, Polygon) and d.poly.area < avg_area * BIG_FILTER
+        ]
+
+    def filter_outlier_points(self):
+        _X = np.array([p.poly.centroid.xy for p in self.detections]).squeeze(2)
+
+        # pwd = np.sum(np.abs(_X[:, None, :] - _X[None, :, :]), axis=-1)
+        # max_pwd = pwd.max()
+        max_pwd = (self.hole_image.shape[1] + self.hole_image.shape[0]) / 2
+
+        db = DBSCAN(eps=max_pwd / 5, min_samples=10, n_jobs=4).fit(_X)
+        labels = db.labels_
+
+        self.detections = [
+            d
+            for _di, d in enumerate(self.detections)
+            if labels[_di] != -1
         ]
 
     def get_points(self):
