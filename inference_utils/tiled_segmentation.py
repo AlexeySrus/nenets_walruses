@@ -5,12 +5,14 @@ from shapely.geometry import Polygon, MultiPolygon
 from imantics import Mask
 from inference_utils.yolact_inference import YOLACTModel
 from inference_utils.mmdet_inference import MMDetectionQueryInstInference
+from inference_utils.crop_utils import create_square_crop_by_detection
 from tqdm import tqdm
 
 WINDOW_STRIDE = 3/4
-POLYGONS_MATCHING_THRESHOLD = 0.1
-FILTER_FALSE_DETECTIONS_THRESHOLD = 0.1
+POLYGONS_MATCHING_THRESHOLD = 0.2
+FILTER_FALSE_DETECTIONS_THRESHOLD = 0.15
 POINTS_MATCHING_THRESHOLD = 0.3
+BIG_FILTER = 3
 
 
 def compute_poly_incircle_center(_poly: Polygon) -> Tuple[int, int]:
@@ -85,9 +87,9 @@ class PolyDetection(object):
         segmentation_data = contours[0].squeeze(1)
 
         if len(segmentation_data) > 100:
-            segmentation_data = segmentation_data[::8]
-        elif len(segmentation_data) > 30:
             segmentation_data = segmentation_data[::4]
+        # elif len(segmentation_data) > 30:
+        #     segmentation_data = segmentation_data[::4]
 
         if len(segmentation_data) < 3:
             self.poly = None
@@ -97,6 +99,15 @@ class PolyDetection(object):
             segmentation_data).astype(np.float32) + position
 
         self.poly = Polygon(segmentation_array)
+
+    def get_square_crop(self, hole_image: np.ndarray) -> np.ndarray:
+        box = cv2.boundingRect(np.array(self.poly.exterior.xy).T.astype(np.float32))
+        x1, y1, w, h = [int(_e) for _e in box]
+        x2, y2 = x1 + w, y1 + h
+        return create_square_crop_by_detection(hole_image, [x1, y1, x2, y2])
+
+    def set_class(self, class_num: int):
+        self.cls = class_num
 
     def estimate_iou(self, other) -> float:
         intersection = self.poly.intersection(other.poly)
@@ -196,6 +207,7 @@ class WindowReadyImage(DetectionsCarrier):
     def __init__(self,
                  image: np.ndarray,
                  inference_function: callable,
+                 young_inference: callable,
                  tile_size: int = 512):
         self.segments = [
             [
@@ -213,6 +225,11 @@ class WindowReadyImage(DetectionsCarrier):
 
         self.filter_noisy_points()
 
+        for _di in tqdm(range(len(self.detections))):
+            self.detections[_di].set_class(
+                young_inference(self.detections[_di].get_square_crop(image))
+            )
+
     def average_polygons_area(self) -> float:
         return np.array(
             [
@@ -226,7 +243,7 @@ class WindowReadyImage(DetectionsCarrier):
         self.detections = [
             d
             for d in self.detections
-            if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5 and isinstance(d.poly, Polygon) and d.poly.area < avg_area * 2.8
+            if d.poly.area - avg_area * FILTER_FALSE_DETECTIONS_THRESHOLD > -1E-5 and isinstance(d.poly, Polygon) and d.poly.area < avg_area * BIG_FILTER
         ]
 
     def get_points(self):

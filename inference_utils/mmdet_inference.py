@@ -5,14 +5,15 @@ import os
 
 
 class MMDetectionQueryInstInference(object):
-    def __init__(self, model_config_path: str = None, device: str = 'cuda:1'):
+    def __init__(self, model_config_path: str = None, device: str = 'cuda:1', conf: float = 0.3):
         if model_config_path is None:
-            model_path = os.path.join(os.path.dirname(__file__), '../data/epoch_4.pth')
+            model_path = os.path.join(os.path.dirname(__file__), '../data/epoch_12.pth')
             config_path = os.path.join(os.path.dirname(__file__), '../data/animals.py')
             model_config_path = model_path, config_path
 
         model_path, config_path = model_config_path
         self.model = init_detector(config_path, model_path, device=device)
+        self.conf = conf
 
     def __call__(self, input_image: np.ndarray) -> tuple:
         image = input_image.copy()
@@ -33,7 +34,7 @@ class MMDetectionQueryInstInference(object):
         res_masks = []
 
         for _i, c in enumerate(confs):
-            if c > 0.4:
+            if c > self.conf:
                 res_masks.append(
                     np.array(result[1][0][_i]).astype(np.uint8) * 255
                 )
