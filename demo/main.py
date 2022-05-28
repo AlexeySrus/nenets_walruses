@@ -25,8 +25,15 @@ from mmdet_inference import MMDetectionQueryInstInference
 from tiled_segmentation import WindowReadyImage
 
 # model = YOLACTModel(device='cpu')
-model = MMDetectionQueryInstInference(conf=0.4)
-yong_clasifier = YoungWalrusesClassier(conf=0.7)
+
+# @st.cache
+def load_models():
+    model = MMDetectionQueryInstInference(conf=0.4)
+    yong_clasifier = YoungWalrusesClassier(conf=0.7)
+    return model, yong_clasifier
+
+
+model, yong_clasifier = load_models()
 
 
 def read_config():
@@ -218,7 +225,6 @@ def layout():
             )
 
 
-
 def process_image(image_uploaded: str):
     image = Image.open(image_uploaded)
     json_results = predict(np.array(image))
@@ -231,11 +237,13 @@ def predict(image: np.ndarray):
         np.array(det.poly.exterior.xy).T.astype(int).ravel().tolist()
         for det in wri.detections
     ]
+    classes = [det.cls == 1 for det in wri.detections]
 
     return {
         'centers': wri.get_points(),
         'boxes': [],
-        'polygons': polygons
+        'polygons': polygons,
+        'classes': classes
     }
 
 
