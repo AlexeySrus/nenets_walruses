@@ -14,7 +14,6 @@ class YoungWalrusesClassier(object):
         self.conf = conf
 
     def __call__(self, image: np.ndarray) -> int:
-        cv2.imwrite('/home/alexey/Downloads/TEST_img.jpg', image)
         inp_tensor = torch.FloatTensor(
             cv2.cvtColor(cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
         ).permute(2, 0, 1).unsqueeze(0) / 255.0
