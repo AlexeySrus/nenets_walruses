@@ -10,3 +10,12 @@ RUN apt-get update && \
 RUN pip3 install --upgrade pip
 
 
+RUN pip3 install torch==1.10 torchvision==0.11 torchaudio==0.10 --extra-index-url https://download.pytorch.org/whl/cu113
+
+RUN pip3 install openmim
+RUN mim install mmdet
+
+COPY . /nenets_walsuses
+WORKDIR /nenets_walsuses/
+ENV PYTHONPATH=/nenets_walsuses
+
