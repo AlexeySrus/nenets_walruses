@@ -16,8 +16,9 @@ sh installation/install_cuda_docker.sh
 ```
 
 Затем скачайте готовый образ с решением по следующей ссылке:
+https://disk.yandex.ru/d/26E-hplXNTEU0w
 
-И загрузите его в Docker:
+А далее загрузите его в Docker:
 ```shell
 sudo docker load --input walruses_rostovnats_server.tar
 ```
@@ -46,3 +47,7 @@ sudo docker run --runtime=nvidia -p 8501:8501 --name RostovNatsServer -d walruse
 ```shell
 sudo docker rm RostovNatsServer
 ```
+
+## Локальное использование
+Для работы с приложением откройте у себя в браузере следующую страницу:
+http://localhost:8501/
