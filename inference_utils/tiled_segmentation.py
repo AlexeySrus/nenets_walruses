@@ -209,18 +209,23 @@ class WindowReadyImage(DetectionsCarrier):
                  inference_function: callable,
                  young_inference: callable,
                  tile_size: int = 512,
-                 filter_outliers: bool = True):
+                 filter_outliers: bool = True,
+                 verbose: bool = False):
+        verbose_wrapper = lambda __clist: __clist
+        if verbose:
+            verbose_wrapper = lambda __clist: tqdm(__clist)
+
         self.segments = [
             [
                 ImageSegment(image, t, (tile_size, tile_size), inference_function)
                 for t in t_line
             ]
-            for t_line in tqdm(tiling_intersected(image, tile_size))
+            for t_line in verbose_wrapper(tiling_intersected(image, tile_size))
         ]
         self.detections = []
         self.hole_image = image
 
-        for t_line in tqdm(self.segments):
+        for t_line in verbose_wrapper(self.segments):
             for t in t_line:
                 merge_carriers(self, t)
 
@@ -228,7 +233,7 @@ class WindowReadyImage(DetectionsCarrier):
         if filter_outliers:
             self.filter_outlier_points()
 
-        for _di in tqdm(range(len(self.detections))):
+        for _di in verbose_wrapper(range(len(self.detections))):
             self.detections[_di].set_class(
                 young_inference(self.detections[_di].get_square_crop(image))
             )
@@ -243,7 +248,6 @@ class WindowReadyImage(DetectionsCarrier):
 
     def filter_noisy_points(self):
         avg_area = self.average_polygons_area()
-        print(FILTER_FALSE_DETECTIONS_THRESHOLD)
         self.detections = [
             d
             for d in self.detections
@@ -257,7 +261,7 @@ class WindowReadyImage(DetectionsCarrier):
         # max_pwd = pwd.max()
         max_pwd = (self.hole_image.shape[1] + self.hole_image.shape[0]) / 2
 
-        db = DBSCAN(eps=max_pwd / 6, min_samples=10, n_jobs=4).fit(_X)
+        db = DBSCAN(eps=max_pwd / 5, min_samples=10, n_jobs=4).fit(_X)
         labels = db.labels_
 
         self.detections = [

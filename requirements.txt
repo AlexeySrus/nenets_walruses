@@ -1,0 +1,14 @@
+opencv-python-headless~=4.5.4.60
+Pillow~=9.1.1
+fastapi~=0.70.0
+tqdm
+shapely
+scikit-learn
+uvicorn~=0.15.0
+folium==0.12.1.post1
+streamlit-folium==0.6.12
+streamlit==1.9.1
+streamlit-aggrid==0.2.3.post2
+requests
+requests-toolbelt
+python-multipart==0.0.5

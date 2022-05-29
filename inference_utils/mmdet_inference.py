@@ -2,10 +2,11 @@ from mmdet.apis import init_detector, inference_detector
 import cv2
 import numpy as np
 import os
+from PIL import Image
 
 
 class MMDetectionQueryInstInference(object):
-    def __init__(self, model_config_path: str = None, device: str = 'cuda:1', conf: float = 0.3):
+    def __init__(self, model_config_path: str = None, device: str = 'cuda', conf: float = 0.3):
         if model_config_path is None:
             model_path = os.path.join(os.path.dirname(__file__), '../data/epoch_12.pth')
             config_path = os.path.join(os.path.dirname(__file__), '../data/animals.py')

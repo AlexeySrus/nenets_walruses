@@ -15,7 +15,7 @@ class YoungWalrusesClassier(object):
 
     def __call__(self, image: np.ndarray) -> int:
         inp_tensor = torch.FloatTensor(
-            cv2.cvtColor(cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+            cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
         ).permute(2, 0, 1).unsqueeze(0) / 255.0
 
         out = torch.softmax(self.model(inp_tensor).detach(), dim=1)

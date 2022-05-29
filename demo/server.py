@@ -68,7 +68,7 @@ def get_models():
     # Not the best model. It may work on CPU.
     # segm_model = YOLACTModel()
     # Better model. Cuda only.
-    segm_model = MMDetectionQueryInstInference(conf=0.4)
+    segm_model = MMDetectionQueryInstInference(conf=0.5)
     # segm_model = MockModel()
     young_clasifier = YoungWalrusesClassier(conf=0.7)
     return segm_model, young_clasifier
