@@ -11,4 +11,5 @@ streamlit==1.9.1
 streamlit-aggrid==0.2.3.post2
 requests
 requests-toolbelt
+sqlmodel
 python-multipart==0.0.5
